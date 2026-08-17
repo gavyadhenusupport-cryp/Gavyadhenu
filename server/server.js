@@ -16,6 +16,8 @@ import couponRoutes from './routes/couponRoutes.js';
 import reviewRoutes from './routes/reviewRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import paymentRoutes from './routes/paymentRoutes.js';
+import Product from './models/Product.js';
+import { seedDemoData } from './data/seed.js';
 
 dotenv.config();
 
@@ -25,6 +27,7 @@ const rootDir = path.resolve(__dirname, '..');
 const uploadsPath = path.join(rootDir, 'server', 'public');
 const clientDistPath = path.join(rootDir, 'client', 'dist');
 const hasClientBuild = fs.existsSync(path.join(clientDistPath, 'index.html'));
+const frontendRootUrl = process.env.CLIENT_URL || process.env.FRONTEND_URL || 'http://localhost:5173';
 
 const app = express();
 const allowedOrigins = [
@@ -62,6 +65,18 @@ app.use('/uploads', express.static(uploadsPath));
 
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'gavyadhenu-api' }));
 
+app.get('/', (req, res) => {
+  if (hasClientBuild) {
+    return res.sendFile(path.join(clientDistPath, 'index.html'));
+  }
+
+  if (req.accepts('html')) {
+    return res.redirect(frontendRootUrl);
+  }
+
+  return res.json({ message: 'Gavyadhenu API is running' });
+});
+
 // Middleware to return 503 when DB is not ready for API routes
 app.use((req, res, next) => {
   if (mongoose.connection.readyState !== 1 && req.path.startsWith('/api')) {
@@ -82,14 +97,12 @@ app.use('/api/payment', paymentRoutes);
 
 if (hasClientBuild) {
   app.use(express.static(clientDistPath));
-  app.get('*', (req, res, next) => {
+  app.get(/^(?!\/api|\/uploads|\/health).*/, (req, res, next) => {
     if (req.path.startsWith('/api') || req.path.startsWith('/uploads') || req.path.startsWith('/health')) {
       return next();
     }
     res.sendFile(path.join(clientDistPath, 'index.html'));
   });
-} else {
-  app.get('/', (req, res) => res.json({ message: 'Gavyadhenu API is running' }));
 }
 
 // Global error handler
@@ -123,10 +136,15 @@ const startServer = async () => {
   try {
     await connectDB();
     console.log('✓ Database connection established. Starting server...');
+
+    const productCount = await Product.countDocuments();
+    if (productCount === 0) {
+      console.log('ℹ️ No products found in database. Seeding demo catalog...');
+      await seedDemoData();
+    }
   } catch (error) {
     console.error('✗ Failed to connect to database on startup:', error.message);
-    console.error('✗ Server will not start without a database connection.');
-    process.exit(1);
+    console.warn('⚠️ Server starting without database. Configure MONGO_URI to enable features.');
   }
 
   // Now listen for requests after DB is ready
